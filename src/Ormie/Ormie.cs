@@ -114,6 +114,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         BindParameters(command, parameters);
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
+
     public async Task UpdateAsync<T>(T entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -140,6 +141,23 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
 
         AddParameter(command, "id", map.Key.Property.GetValue(entity));
 
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task DeleteAsync<T>(T entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        var map = GetMap(typeof(T));
+        if (map.Key is null)
+        {
+            throw new InvalidOperationException($"Entity {typeof(T).Name} has no key mapped.");
+        }
+
+        var sql = $"DELETE FROM {QuoteIdentifier(map.TableName)} WHERE {QuoteIdentifier(map.Key.ColumnName)} = @id";
+
+        await using var command = CreateCommand(sql);
+        AddParameter(command, "id", map.Key.Property.GetValue(entity));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
