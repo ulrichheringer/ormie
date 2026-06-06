@@ -52,4 +52,27 @@ public class RegistrationTests : OrmieIntegrationTestBase
 
         Assert.Contains("no key", ex.Message);
     }
+
+    [Fact]
+    public async Task DeleteAsync_throws_when_entity_not_registered()
+    {
+        var act = () => Orm.DeleteAsync(new User { Email = "x@example.com", Name = "X" });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(act);
+
+        Assert.Contains("not registered", ex.Message);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_throws_when_entity_has_no_key()
+    {
+        Orm.Register<KeylessEntity>();
+        await Orm.MigrateAsync<KeylessEntity>();
+
+        var act = () => Orm.DeleteAsync(new KeylessEntity { Name = "X" });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(act);
+
+        Assert.Contains("no key", ex.Message);
+    }
 }

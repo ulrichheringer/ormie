@@ -1,4 +1,5 @@
 using System.Data;
+using System.Reflection;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Ormie.Mapping;
@@ -108,12 +109,22 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         return results;
     }
 
+    public async Task<IReadOnlyList<T>> FindAllAsync<T>(CancellationToken cancellationToken = default)
+    {
+        var map = GetMap(typeof(T));
+        var columns = string.Join(", ", map.Properties.Select(p => QuoteIdentifier(p.ColumnName)));
+        var sql = $"SELECT {columns} FROM {QuoteIdentifier(map.TableName)}";
+
+        return await QueryAsync<T>(sql, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<int> ExecuteAsync(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var command = CreateCommand(sql);
         BindParameters(command, parameters);
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
+
     public async Task UpdateAsync<T>(T entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -140,6 +151,23 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
 
         AddParameter(command, "id", map.Key.Property.GetValue(entity));
 
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task DeleteAsync<T>(T entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        var map = GetMap(typeof(T));
+        if (map.Key is null)
+        {
+            throw new InvalidOperationException($"Entity {typeof(T).Name} has no key mapped.");
+        }
+
+        var sql = $"DELETE FROM {QuoteIdentifier(map.TableName)} WHERE {QuoteIdentifier(map.Key.ColumnName)} = @id";
+
+        await using var command = CreateCommand(sql);
+        AddParameter(command, "id", map.Key.Property.GetValue(entity));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -194,6 +222,11 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
             var ordinal = reader.GetOrdinal(property.ColumnName);
             if (reader.IsDBNull(ordinal))
             {
+                if (IsNullableProperty(property.Property))
+                {
+                    property.Property.SetValue(entity, null);
+                }
+
                 continue;
             }
 
@@ -233,6 +266,12 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
     private static void AddParameter(SqliteCommand command, string name, object? value)
     {
         command.Parameters.AddWithValue($"@{name}", value ?? DBNull.Value);
+    }
+
+    private static bool IsNullableProperty(PropertyInfo property)
+    {
+        var nullability = new NullabilityInfoContext().Create(property);
+        return nullability.WriteState is NullabilityState.Nullable;
     }
 
     private static bool IsDefaultKeyValue(object? value) =>

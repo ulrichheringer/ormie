@@ -29,7 +29,7 @@ public class MigrationTests : OrmieIntegrationTestBase
     {
         await Orm.MigrateAsync<User>();
         await Orm.ExecuteAsync(
-            "INSERT INTO users (email, Name) VALUES (@email, @name)",
+            "INSERT INTO users (email, name) VALUES (@email, @name)",
             new { email = "exec@example.com", name = "Exec" });
 
         var users = await Orm.QueryAsync<User>("SELECT * FROM users WHERE email = @email", new { email = "exec@example.com" });
