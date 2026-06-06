@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, master]
+  pull_request:
+    branches: [dev, master]
+
+env:
+  COVERAGE_THRESHOLD: "0.80"
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore ormie.slnx
+
+      - name: Build
+        run: dotnet build ormie.slnx --configuration Release --no-restore
+
+      - name: Test with coverage
+        run: dotnet test tests/Ormie.Tests/Ormie.Tests.csproj --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory coverage
+
+      - name: Enforce line coverage threshold
+        run: |
+          FILE=$(find coverage -name 'coverage.cobertura.xml' | head -1)
+          if [ -z "$FILE" ]; then
+            echo "Coverage file not found"
+            exit 1
+          fi
+
+          LINE_RATE=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('${FILE}').getroot().attrib['line-rate'])")
+          echo "Line coverage: ${LINE_RATE} (threshold: ${COVERAGE_THRESHOLD})"
+
+          python3 -c "import sys; sys.exit(0 if float('${LINE_RATE}') >= float('${COVERAGE_THRESHOLD}') else 1)"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/**/coverage.cobertura.xml
