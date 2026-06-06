@@ -2,6 +2,7 @@ using System.Data;
 using System.Reflection;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Ormie.Linq;
 using Ormie.Mapping;
 
 namespace Ormie;
@@ -10,6 +11,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly Dictionary<Type, EntityMap> _maps = new();
+    private SqliteTransaction? _transaction;
 
     public Ormie(string connectionString)
     {
@@ -38,6 +40,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         var map = GetMap(typeof(T));
         var sql = BuildCreateTableSql(map);
         await ExecuteAsync(sql, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await EnsureColumnsAsync(map, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task InsertAsync<T>(T entity, CancellationToken cancellationToken = default)
@@ -118,6 +121,92 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         return await QueryAsync<T>(sql, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    public OrmQuery<T> Query<T>() => new(this, GetMap(typeof(T)));
+
+    internal EntityMap GetEntityMap(Type clrType) => GetMap(clrType);
+
+    public async Task<IReadOnlyList<TResult>> QueryProjectedAsync<TResult>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<TResult>();
+        var properties = typeof(TResult).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.CanWrite)
+            .ToList();
+
+        await using var command = CreateCommand(sql);
+        foreach (var (name, value) in parameters)
+        {
+            AddParameter(command, name, value);
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var item = Activator.CreateInstance<TResult>();
+            foreach (var property in properties)
+            {
+                var ordinal = reader.GetOrdinal(property.Name);
+                if (reader.IsDBNull(ordinal))
+                {
+                    continue;
+                }
+
+                var value = reader.GetValue(ordinal);
+                var targetType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+                property.SetValue(item, Convert.ChangeType(value, targetType));
+            }
+
+            results.Add(item);
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<T>> QueryWithParametersAsync<T>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
+    {
+        var map = GetMap(typeof(T));
+
+        await using var command = CreateCommand(sql);
+        foreach (var (name, value) in parameters)
+        {
+            AddParameter(command, name, value);
+        }
+
+        var results = new List<T>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(Materialize<T>(map, reader));
+        }
+
+        return results;
+    }
+
+    public async Task<TResult> ExecuteScalarAsync<TResult>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
+    {
+        await using var command = CreateCommand(sql);
+        foreach (var (name, value) in parameters)
+        {
+            AddParameter(command, name, value);
+        }
+
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (result is null or DBNull)
+        {
+            return default!;
+        }
+
+        return (TResult)Convert.ChangeType(result, typeof(TResult));
+    }
+
     public async Task<int> ExecuteAsync(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var command = CreateCommand(sql);
@@ -171,6 +260,26 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<OrmieTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (_transaction is not null)
+        {
+            throw new InvalidOperationException("A transaction is already active on this connection.");
+        }
+
+        _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        return new OrmieTransaction(this, _transaction);
+    }
+
+    public async Task TransactionAsync(Func<Ormie, Task> action, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        await using var transaction = await BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await action(this).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public void Dispose() => _connection.Dispose();
 
     public ValueTask DisposeAsync()
@@ -188,6 +297,8 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
 
         throw new InvalidOperationException($"Entity {clrType.Name} is not registered. Call Register<{clrType.Name}>() first.");
     }
+
+    internal void ClearActiveTransaction() => _transaction = null;
 
     private static string BuildCreateTableSql(EntityMap map)
     {
@@ -211,6 +322,41 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         });
 
         return $"CREATE TABLE IF NOT EXISTS {QuoteIdentifier(map.TableName)} ({string.Join(", ", columns)})";
+    }
+
+    private async Task EnsureColumnsAsync(EntityMap map, CancellationToken cancellationToken)
+    {
+        var existingColumns = await GetTableColumnNamesAsync(map.TableName, cancellationToken).ConfigureAwait(false);
+        if (existingColumns.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var property in map.Properties)
+        {
+            if (existingColumns.Contains(property.ColumnName))
+            {
+                continue;
+            }
+
+            var alterSql =
+                $"ALTER TABLE {QuoteIdentifier(map.TableName)} ADD COLUMN {QuoteIdentifier(property.ColumnName)} {property.SqlType}";
+            await ExecuteAsync(alterSql, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<HashSet<string>> GetTableColumnNamesAsync(string tableName, CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using var command = CreateCommand($"PRAGMA table_info({QuoteIdentifier(tableName)})");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        return columns;
     }
 
     private static T Materialize<T>(EntityMap map, SqliteDataReader reader)
@@ -242,6 +388,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
     {
         var command = _connection.CreateCommand();
         command.CommandText = sql;
+        command.Transaction = _transaction;
         return command;
     }
 
