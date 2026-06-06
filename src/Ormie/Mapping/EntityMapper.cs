@@ -13,6 +13,8 @@ public static class EntityMapper
         var properties = clrType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanRead && p.CanWrite)
+            .Where(p => p.GetCustomAttribute<NotMappedAttribute>() is null)
+            .Where(p => !IsNavigationProperty(p))
             .Select(MapProperty)
             .ToList();
 
@@ -69,6 +71,22 @@ public static class EntityMapper
     {
         var underlying = Nullable.GetUnderlyingType(type) ?? type;
         return underlying == typeof(int) || underlying == typeof(long);
+    }
+
+    private static bool IsNavigationProperty(PropertyInfo property)
+    {
+        var type = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+        if (type == typeof(string))
+        {
+            return false;
+        }
+
+        if (type.IsPrimitive || type == typeof(decimal) || type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(Guid))
+        {
+            return false;
+        }
+
+        return type.IsClass || type.IsInterface;
     }
 
     private static string ToSnakeCase(string name)
