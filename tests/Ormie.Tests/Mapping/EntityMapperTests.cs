@@ -13,7 +13,7 @@ public class EntityMapperTests
         Assert.Equal(typeof(User), map.ClrType);
         Assert.Equal("users", map.TableName);
         Assert.Equal(3, map.Properties.Count);
-        Assert.Equal("Id", map.Key?.ColumnName);
+        Assert.Equal("id", map.Key?.ColumnName);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class EntityMapperTests
     {
         var map = EntityMapper.Map<Article>();
 
-        Assert.Equal("PostId", map.Key?.ColumnName);
+        Assert.Equal("post_id", map.Key?.ColumnName);
         Assert.True(map.Key?.IsAutoIncrement);
     }
 

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Reflection;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Ormie.Mapping;
@@ -194,7 +195,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
             var ordinal = reader.GetOrdinal(property.ColumnName);
             if (reader.IsDBNull(ordinal))
             {
-                if (IsNullableProperty(property.Property.PropertyType))
+                if (IsNullableProperty(property.Property))
                 {
                     property.Property.SetValue(entity, null);
                 }
@@ -240,8 +241,11 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         command.Parameters.AddWithValue($"@{name}", value ?? DBNull.Value);
     }
 
-    private static bool IsNullableProperty(Type type) =>
-        Nullable.GetUnderlyingType(type) is not null || !type.IsValueType;
+    private static bool IsNullableProperty(PropertyInfo property)
+    {
+        var nullability = new NullabilityInfoContext().Create(property);
+        return nullability.WriteState is NullabilityState.Nullable;
+    }
 
     private static bool IsDefaultKeyValue(object? value) =>
         value switch
