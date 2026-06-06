@@ -3,4 +3,7 @@
     <Project Path="src/Ormie.Playground/Ormie.Playground.csproj" />
     <Project Path="src/Ormie/Ormie.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Ormie.Tests/Ormie.Tests.csproj" />
+  </Folder>
 </Solution>
