@@ -10,6 +10,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly Dictionary<Type, EntityMap> _maps = new();
+    private SqliteTransaction? _transaction;
 
     public Ormie(string connectionString)
     {
@@ -171,6 +172,26 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<OrmieTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (_transaction is not null)
+        {
+            throw new InvalidOperationException("A transaction is already active on this connection.");
+        }
+
+        _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        return new OrmieTransaction(this, _transaction);
+    }
+
+    public async Task TransactionAsync(Func<Ormie, Task> action, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        await using var transaction = await BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await action(this).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public void Dispose() => _connection.Dispose();
 
     public ValueTask DisposeAsync()
@@ -188,6 +209,8 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
 
         throw new InvalidOperationException($"Entity {clrType.Name} is not registered. Call Register<{clrType.Name}>() first.");
     }
+
+    internal void ClearActiveTransaction() => _transaction = null;
 
     private static string BuildCreateTableSql(EntityMap map)
     {
@@ -242,6 +265,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
     {
         var command = _connection.CreateCommand();
         command.CommandText = sql;
+        command.Transaction = _transaction;
         return command;
     }
 
