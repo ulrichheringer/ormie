@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 
 namespace Ormie.Mapping;
 
@@ -26,7 +27,7 @@ public static class EntityMapper
 
     private static PropertyMap MapProperty(PropertyInfo property)
     {
-        var columnName = property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+        var columnName = property.GetCustomAttribute<ColumnAttribute>()?.Name ?? ToSnakeCase(property.Name);
         var isKey = property.GetCustomAttribute<KeyAttribute>() is not null
             || string.Equals(property.Name, "Id", StringComparison.OrdinalIgnoreCase);
         var sqlType = ResolveSqlType(property.PropertyType);
@@ -68,5 +69,38 @@ public static class EntityMapper
     {
         var underlying = Nullable.GetUnderlyingType(type) ?? type;
         return underlying == typeof(int) || underlying == typeof(long);
+    }
+
+    private static string ToSnakeCase(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return name;
+        }
+
+        var builder = new StringBuilder(name.Length + 5);
+
+        for (var i = 0; i < name.Length; i++)
+        {
+            var current = name[i];
+            if (char.IsUpper(current))
+            {
+                var needsUnderscore = i > 0
+                    && (char.IsLower(name[i - 1])
+                        || (i + 1 < name.Length && char.IsLower(name[i + 1])));
+
+                if (needsUnderscore)
+                {
+                    builder.Append('_');
+                }
+
+                builder.Append(char.ToLowerInvariant(current));
+                continue;
+            }
+
+            builder.Append(current);
+        }
+
+        return builder.ToString();
     }
 }

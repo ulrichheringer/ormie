@@ -51,7 +51,7 @@ public class QueryTests : OrmieIntegrationTestBase
     public async Task GetByIdAsync_skips_null_columns_when_materializing()
     {
         await Orm.ExecuteAsync(
-            "INSERT INTO users (email, Name) VALUES (@email, NULL)",
+            "INSERT INTO users (email, name) VALUES (@email, NULL)",
             new { email = "null-name@example.com" });
 
         var loaded = await Orm.GetByIdAsync<User>(1);
