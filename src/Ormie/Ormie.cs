@@ -109,6 +109,15 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         return results;
     }
 
+    public async Task<IReadOnlyList<T>> FindAllAsync<T>(CancellationToken cancellationToken = default)
+    {
+        var map = GetMap(typeof(T));
+        var columns = string.Join(", ", map.Properties.Select(p => QuoteIdentifier(p.ColumnName)));
+        var sql = $"SELECT {columns} FROM {QuoteIdentifier(map.TableName)}";
+
+        return await QueryAsync<T>(sql, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<int> ExecuteAsync(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var command = CreateCommand(sql);
