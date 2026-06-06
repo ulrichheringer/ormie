@@ -20,3 +20,9 @@ Console.WriteLine($"Loaded back: {loaded?.Name}");
 
 var allUsers = await orm.QueryAsync<User>("SELECT * FROM users ORDER BY Id");
 Console.WriteLine($"Total users: {allUsers.Count}");
+
+var filtered = await orm.Query<User>()
+    .Where(user => user.Email.Contains("example"))
+    .OrderBy(user => user.Name)
+    .ToListAsync();
+Console.WriteLine($"Filtered users: {filtered.Count}");

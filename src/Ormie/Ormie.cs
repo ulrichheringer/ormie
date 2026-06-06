@@ -2,6 +2,7 @@ using System.Data;
 using System.Reflection;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Ormie.Linq;
 using Ormie.Mapping;
 
 namespace Ormie;
@@ -117,6 +118,92 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         var sql = $"SELECT {columns} FROM {QuoteIdentifier(map.TableName)}";
 
         return await QueryAsync<T>(sql, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    public OrmQuery<T> Query<T>() => new(this, GetMap(typeof(T)));
+
+    internal EntityMap GetEntityMap(Type clrType) => GetMap(clrType);
+
+    public async Task<IReadOnlyList<TResult>> QueryProjectedAsync<TResult>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<TResult>();
+        var properties = typeof(TResult).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.CanWrite)
+            .ToList();
+
+        await using var command = CreateCommand(sql);
+        foreach (var (name, value) in parameters)
+        {
+            AddParameter(command, name, value);
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var item = Activator.CreateInstance<TResult>();
+            foreach (var property in properties)
+            {
+                var ordinal = reader.GetOrdinal(property.Name);
+                if (reader.IsDBNull(ordinal))
+                {
+                    continue;
+                }
+
+                var value = reader.GetValue(ordinal);
+                var targetType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+                property.SetValue(item, Convert.ChangeType(value, targetType));
+            }
+
+            results.Add(item);
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<T>> QueryWithParametersAsync<T>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
+    {
+        var map = GetMap(typeof(T));
+
+        await using var command = CreateCommand(sql);
+        foreach (var (name, value) in parameters)
+        {
+            AddParameter(command, name, value);
+        }
+
+        var results = new List<T>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(Materialize<T>(map, reader));
+        }
+
+        return results;
+    }
+
+    public async Task<TResult> ExecuteScalarAsync<TResult>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
+    {
+        await using var command = CreateCommand(sql);
+        foreach (var (name, value) in parameters)
+        {
+            AddParameter(command, name, value);
+        }
+
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (result is null or DBNull)
+        {
+            return default!;
+        }
+
+        return (TResult)Convert.ChangeType(result, typeof(TResult));
     }
 
     public async Task<int> ExecuteAsync(string sql, object? parameters = null, CancellationToken cancellationToken = default)
