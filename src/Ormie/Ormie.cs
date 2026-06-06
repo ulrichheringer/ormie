@@ -40,6 +40,7 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         var map = GetMap(typeof(T));
         var sql = BuildCreateTableSql(map);
         await ExecuteAsync(sql, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await EnsureColumnsAsync(map, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task InsertAsync<T>(T entity, CancellationToken cancellationToken = default)
@@ -321,6 +322,41 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
         });
 
         return $"CREATE TABLE IF NOT EXISTS {QuoteIdentifier(map.TableName)} ({string.Join(", ", columns)})";
+    }
+
+    private async Task EnsureColumnsAsync(EntityMap map, CancellationToken cancellationToken)
+    {
+        var existingColumns = await GetTableColumnNamesAsync(map.TableName, cancellationToken).ConfigureAwait(false);
+        if (existingColumns.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var property in map.Properties)
+        {
+            if (existingColumns.Contains(property.ColumnName))
+            {
+                continue;
+            }
+
+            var alterSql =
+                $"ALTER TABLE {QuoteIdentifier(map.TableName)} ADD COLUMN {QuoteIdentifier(property.ColumnName)} {property.SqlType}";
+            await ExecuteAsync(alterSql, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<HashSet<string>> GetTableColumnNamesAsync(string tableName, CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using var command = CreateCommand($"PRAGMA table_info({QuoteIdentifier(tableName)})");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        return columns;
     }
 
     private static T Materialize<T>(EntityMap map, SqliteDataReader reader)

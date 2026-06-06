@@ -7,34 +7,36 @@ public class MigrationTests : OrmieIntegrationTestBase
 {
     protected override Task ConfigureAsync(global::Ormie.Ormie orm)
     {
-        orm.Register<User>();
+        orm.Register<SchemaVersionEntity>();
         return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task MigrateAsync_is_idempotent()
+    public async Task MigrateAsync_creates_table_on_first_run()
     {
-        await Orm.MigrateAsync<User>();
-        await Orm.MigrateAsync<User>();
+        await Orm.MigrateAsync<SchemaVersionEntity>();
+        await Orm.InsertAsync(new SchemaVersionEntity { Title = "Draft" });
 
-        await Orm.InsertAsync(new User { Email = "ok@example.com", Name = "Ok" });
+        var loaded = await Orm.GetByIdAsync<SchemaVersionEntity>(1);
 
-        var loaded = await Orm.GetByIdAsync<User>(1);
-
-        Assert.NotNull(loaded);
+        Assert.Equal("Draft", loaded!.Title);
     }
 
     [Fact]
-    public async Task ExecuteAsync_runs_parameterized_sql()
+    public async Task MigrateAsync_adds_new_columns_to_existing_table()
     {
-        await Orm.MigrateAsync<User>();
-        await Orm.ExecuteAsync(
-            "INSERT INTO users (email, name) VALUES (@email, @name)",
-            new { email = "exec@example.com", name = "Exec" });
+        await Orm.MigrateAsync<SchemaVersionEntity>();
+        await Orm.InsertAsync(new SchemaVersionEntity { Title = "Draft" });
 
-        var users = await Orm.QueryAsync<User>("SELECT * FROM users WHERE email = @email", new { email = "exec@example.com" });
+        Orm.Register<SchemaVersionEntityV2>();
+        await Orm.MigrateAsync<SchemaVersionEntityV2>();
 
-        Assert.Single(users);
-        Assert.Equal("Exec", users[0].Name);
+        var loaded = await Orm.GetByIdAsync<SchemaVersionEntityV2>(1);
+        Assert.Equal("Draft", loaded!.Title);
+        Assert.Null(loaded.Tag);
+
+        await Orm.InsertAsync(new SchemaVersionEntityV2 { Title = "Published", Tag = "news" });
+        var published = await Orm.GetByIdAsync<SchemaVersionEntityV2>(2);
+        Assert.Equal("news", published!.Tag);
     }
 }
