@@ -212,6 +212,11 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
             var ordinal = reader.GetOrdinal(property.ColumnName);
             if (reader.IsDBNull(ordinal))
             {
+                if (IsNullableProperty(property.Property.PropertyType))
+                {
+                    property.Property.SetValue(entity, null);
+                }
+
                 continue;
             }
 
@@ -252,6 +257,9 @@ public sealed class Ormie : IAsyncDisposable, IDisposable
     {
         command.Parameters.AddWithValue($"@{name}", value ?? DBNull.Value);
     }
+
+    private static bool IsNullableProperty(Type type) =>
+        Nullable.GetUnderlyingType(type) is not null || !type.IsValueType;
 
     private static bool IsDefaultKeyValue(object? value) =>
         value switch

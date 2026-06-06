@@ -49,13 +49,22 @@ public class EntityMapperTests
     [InlineData(nameof(Article.Score), "REAL", false)]
     [InlineData(nameof(Article.Title), "TEXT", false)]
     [InlineData(nameof(Article.CreatedAt), "TEXT", false)]
-    public void Map_resolves_sql_types(string propertyName, string expectedSqlType, bool isAutoIncrement)
+    public void Map_resolves_sql_types_for_article(string propertyName, string expectedSqlType, bool isAutoIncrement)
     {
         var map = EntityMapper.Map<Article>();
         var property = map.Properties.Single(p => p.Property.Name == propertyName);
 
         Assert.Equal(expectedSqlType, property.SqlType);
         Assert.Equal(isAutoIncrement, property.IsAutoIncrement);
+    }
+
+    [Fact]
+    public void Map_resolves_nullable_int_as_integer()
+    {
+        var map = EntityMapper.Map<Profile>();
+        var score = map.Properties.Single(p => p.Property.Name == nameof(Profile.Score));
+
+        Assert.Equal("INTEGER", score.SqlType);
     }
 
     [Fact]
