@@ -12,7 +12,7 @@ public class LinqTranslationFailureTests
     {
         var map = EntityMapper.Map<User>();
         var predicate = (Expression<Func<User, bool>>)(user => user.GetHashCode() > 0);
-        var translator = new SqlExpressionTranslator(map);
+        var translator = new SqlExpressionTranslator(map, predicate.Parameters[0]);
 
         Assert.Throws<LinqTranslationException>(() =>
         {

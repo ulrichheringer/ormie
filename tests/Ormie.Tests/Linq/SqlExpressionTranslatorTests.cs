@@ -12,7 +12,7 @@ public class SqlExpressionTranslatorTests
     {
         var map = EntityMapper.Map<User>();
         var predicate = (Expression<Func<User, bool>>)(user => user.Name == "Alice");
-        var translator = new SqlExpressionTranslator(map);
+        var translator = new SqlExpressionTranslator(map, predicate.Parameters[0]);
 
         var (sql, parameters) = translator.Translate(predicate.Body, predicate.Parameters[0]);
 
@@ -25,7 +25,7 @@ public class SqlExpressionTranslatorTests
     {
         var map = EntityMapper.Map<User>();
         var predicate = (Expression<Func<User, bool>>)(user => user.Name == "Alice" && user.Id > 1);
-        var translator = new SqlExpressionTranslator(map);
+        var translator = new SqlExpressionTranslator(map, predicate.Parameters[0]);
 
         var (sql, parameters) = translator.Translate(predicate.Body, predicate.Parameters[0]);
 
@@ -39,7 +39,7 @@ public class SqlExpressionTranslatorTests
     {
         var map = EntityMapper.Map<User>();
         var predicate = (Expression<Func<User, bool>>)(user => user.Email.Contains("example"));
-        var translator = new SqlExpressionTranslator(map);
+        var translator = new SqlExpressionTranslator(map, predicate.Parameters[0]);
 
         var (sql, parameters) = translator.Translate(predicate.Body, predicate.Parameters[0]);
 
